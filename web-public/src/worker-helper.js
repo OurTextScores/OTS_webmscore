@@ -6,7 +6,14 @@
 import { WebMscoreWorker } from '../.cache/worker.js'
 import { getSelfURL, shimDom } from './utils.js'
 
-const MSCORE_SCRIPT_URL = getSelfURL()
+const SVG_UTF8_RESULT_KEY = '__webmscoreSvgUtf8'
+const svgTextDecoder = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null
+
+// Check if MSCORE_SCRIPT_URL is defined globally (by webpack DefinePlugin for embedded builds)
+// If not, fallback to getSelfURL() which extracts the path from the current script
+const MSCORE_SCRIPT_URL = typeof globalThis.MSCORE_SCRIPT_URL !== 'undefined'
+    ? globalThis.MSCORE_SCRIPT_URL
+    : getSelfURL()
 
 /**
  * Reconstruct `Error` objects sent from the web worker
@@ -41,9 +48,11 @@ class WebMscoreW {
      * @hideconstructor use `WebMscoreW.load`
      */
     constructor() {
+        const refreshStub = 'var $RefreshSig$ = () => (type) => type; var $RefreshReg$ = () => {};';
         const url = URL.createObjectURL(
             new Blob([
                 `(function () { var MSCORE_SCRIPT_URL = "${MSCORE_SCRIPT_URL}";`  // set the environment variable for worker
+                + refreshStub // avoid React Fast Refresh helpers leaking into worker builds
                 + '(' + shimDom.toString() + ')();'
                 // %INJECTION_HINT_1%
                 + '(' + WebMscoreWorker.toString() + ')()'
@@ -106,21 +115,42 @@ class WebMscoreW {
      * Communicate with the worker thread with JSON-RPC
      * @private
      * @typedef {{ id: number; result?: any; error?: any; }} RPCRes
-     * @param {keyof import('./index').default | '_synthAudio' | 'processSynth' | 'processSynthBatch' | 'load' | 'ready' | 'setLogLevel'} method 
+     * @param {keyof import('./index').default | '_synthAudio' | '_synthAudioFromSelection' | '_synthAudioSelectionPreview' | 'processSynth' | 'processSynthBatch' | 'load' | 'ready' | 'setLogLevel'} method 
      * @param {any[]} params 
      * @param {Transferable[]} transfer
      */
     async rpc(method, params = [], transfer = []) {
         const id = Math.random()
+        const debugRenderRpc = method === 'saveSvg' || method === 'savePng'
+        const debugStart = debugRenderRpc ? Date.now() : 0
+        if (debugRenderRpc) {
+            console.info(`[webmscore-rpc] ${method}:start`, { id, params })
+        }
 
         return new Promise((resolve, reject) => {
             const listener = (e) => {
                 /** @type {RPCRes} */
                 const data = e.data
                 if (data.id === id) {
+                    let result = data.result
+                    if (method === 'saveSvg' && result && typeof result === 'object') {
+                        const encoded = result[SVG_UTF8_RESULT_KEY]
+                        if (encoded instanceof Uint8Array && svgTextDecoder) {
+                            result = svgTextDecoder.decode(encoded)
+                        }
+                    }
+                    if (debugRenderRpc) {
+                        console.info(`[webmscore-rpc] ${method}:response`, {
+                            id,
+                            ms: Date.now() - debugStart,
+                            hasError: !!data.error,
+                            resultType: typeof result,
+                            resultLength: typeof result === 'string' ? result.length : null,
+                        })
+                    }
                     if (data.error) { reject(new WorkerError(data.error)) }
                     this.worker.removeEventListener('message', listener)
-                    resolve(data.result)
+                    resolve(result)
                 }
             }
 
@@ -170,6 +200,14 @@ class WebMscoreW {
     }
 
     /**
+     * Get the score subtitle
+     * @returns {Promise<string>}
+     */
+    subtitle() {
+        return this.rpc('subtitle')
+    }
+
+    /**
      * Get the score title (filename safe, replaced some characters)
      * @returns {Promise<string>}
      */
@@ -178,11 +216,146 @@ class WebMscoreW {
     }
 
     /**
+     * Set the score title in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setTitleText(text) {
+        return this.rpc('setTitleText', [text])
+    }
+
+    /**
+     * Set the score subtitle in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setSubtitleText(text) {
+        return this.rpc('setSubtitleText', [text])
+    }
+
+    /**
+     * Set the score composer in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setComposerText(text) {
+        return this.rpc('setComposerText', [text])
+    }
+
+    /**
+     * Set the score lyricist in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setLyricistText(text) {
+        return this.rpc('setLyricistText', [text])
+    }
+
+    /**
+     * Set the text value for the currently selected text element.
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    setSelectedText(text) {
+        return this.rpc('setSelectedText', [text])
+    }
+
+    /**
+     * Append a new part using an instrument template id
+     * @param {string} instrumentId
+     * @returns {Promise<boolean>}
+     */
+    appendPart(instrumentId) {
+        return this.rpc('appendPart', [instrumentId])
+    }
+
+    /**
+     * Append a new part using a MusicXML instrument id
+     * @param {string} instrumentMusicXmlId
+     * @returns {Promise<boolean>}
+     */
+    appendPartByMusicXmlId(instrumentMusicXmlId) {
+        return this.rpc('appendPartByMusicXmlId', [instrumentMusicXmlId])
+    }
+
+    /**
+     * Remove a part by index
+     * @param {number} partIndex
+     * @returns {Promise<boolean>}
+     */
+    removePart(partIndex) {
+        return this.rpc('removePart', [partIndex])
+    }
+
+    /**
+     * Toggle part visibility by index
+     * @param {number} partIndex
+     * @param {boolean} visible
+     * @returns {Promise<boolean>}
+     */
+    setPartVisible(partIndex, visible) {
+        return this.rpc('setPartVisible', [partIndex, visible])
+    }
+
+    /**
+     * List available instrument templates
+     * @returns {Promise<any[]>}
+     */
+    listInstrumentTemplates() {
+        return this.rpc('listInstrumentTemplates')
+    }
+
+    /**
      * Get the number of pages in the score (or the excerpt if `excerptId` is set)
      * @returns {Promise<number>}
      */
     npages() {
         return this.rpc('npages')
+    }
+
+    /**
+     * Get the number of measures in a part (measure index basis for signatures).
+     * @param {number} partIndex
+     * @returns {Promise<number>}
+     */
+    measureSignatureCount(partIndex) {
+        return this.rpc('measureSignatureCount', [partIndex])
+    }
+
+    /**
+     * Get a compact signature string for a specific part measure.
+     * @param {number} partIndex
+     * @param {number} measureIndex
+     * @returns {Promise<string>}
+     */
+    measureSignatureAt(partIndex, measureIndex) {
+        return this.rpc('measureSignatureAt', [partIndex, measureIndex])
+    }
+
+    /**
+     * Get all measure signatures for a part.
+     * @param {number} partIndex
+     * @returns {Promise<string[]>}
+     */
+    measureSignatures(partIndex) {
+        return this.rpc('measureSignatures', [partIndex])
+    }
+
+    /**
+     * Get line break flags for each measure in the score.
+     * @returns {Promise<boolean[]>}
+     */
+    measureLineBreaks() {
+        return this.rpc('measureLineBreaks')
+    }
+
+    /**
+     * Set line break flags for each measure in the score.
+     * @param {boolean[]} breaks
+     * @returns {Promise<boolean>}
+     */
+    setMeasureLineBreaks(breaks) {
+        return this.rpc('setMeasureLineBreaks', [breaks])
     }
 
     /**
@@ -237,11 +410,12 @@ class WebMscoreW {
     /**
      * Export score as the SVG file of one page
      * @param {number} pageNumber integer
-     * @param {boolean} drawPageBackground 
+     * @param {boolean} drawPageBackground
+     * @param {boolean} highlightSelection - if true, selected elements will be rendered with selection color
      * @returns {Promise<string>} contents of the SVG file (plain text)
      */
-    saveSvg(pageNumber = 0, drawPageBackground = false) {
-        return this.rpc('saveSvg', [pageNumber, drawPageBackground])
+    saveSvg(pageNumber = 0, drawPageBackground = false, highlightSelection = false) {
+        return this.rpc('saveSvg', [pageNumber, drawPageBackground, highlightSelection])
     }
 
     /**
@@ -327,12 +501,557 @@ class WebMscoreW {
     }
 
     /**
+     * Synthesize audio frames from the current cursor/selection playback position.
+     * @param {number} batchSize - max number of result SynthRes' (n * 512 frames)
+     * @returns {Promise<(cancel?: boolean) => Promise<import('../schemas').SynthRes[]>>}
+     */
+    async synthAudioBatchFromSelection(batchSize) {
+        const fnptr = await this.rpc('_synthAudioFromSelection')
+        return (cancel) => {
+            return this.rpc('processSynthBatch', [fnptr, batchSize, cancel])
+        }
+    }
+
+    /**
+     * Synthesize a short isolated preview for the current selection (note/chord).
+     * @param {number} batchSize - max number of result SynthRes' (n * 512 frames)
+     * @param {number} durationMs - preview duration in milliseconds
+     * @returns {Promise<(cancel?: boolean) => Promise<import('../schemas').SynthRes[]>>}
+     */
+    async synthSelectionPreviewBatch(batchSize, durationMs = 500) {
+        const fnptr = await this.rpc('_synthAudioSelectionPreview', [durationMs])
+        return (cancel) => {
+            return this.rpc('processSynthBatch', [fnptr, batchSize, cancel])
+        }
+    }
+
+    /**
      * Export score metadata as JSON string
      * @also `score.metadata()`
      * @returns {Promise<string>} contents of the JSON file
      */
     saveMetadata() {
         return this.rpc('saveMetadata')
+    }
+
+    /**
+     * Select the topmost selectable element near a page-relative point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    selectElementAtPoint(pageNumber, x, y) {
+        return this.rpc('selectElementAtPoint', [pageNumber, x, y])
+    }
+
+    /**
+     * Select a measure near a page-relative point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    selectMeasureAtPoint(pageNumber, x, y) {
+        return this.rpc('selectMeasureAtPoint', [pageNumber, x, y])
+    }
+
+    /**
+     * Select a measure by index for a specific part.
+     * @param {number} partIndex
+     * @param {number} measureIndex
+     * @returns {Promise<boolean>}
+     */
+    selectPartMeasureByIndex(partIndex, measureIndex) {
+        return this.rpc('selectPartMeasureByIndex', [partIndex, measureIndex])
+    }
+
+    /**
+     * Select a text element near a page-relative point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    selectTextElementAtPoint(pageNumber, x, y) {
+        return this.rpc('selectTextElementAtPoint', [pageNumber, x, y])
+    }
+
+    /**
+     * Clear current selection.
+     * @returns {Promise<boolean>}
+     */
+    clearSelection() {
+        return this.rpc('clearSelection')
+    }
+
+    /**
+     * Move selection to the next chord
+     * @returns {Promise<boolean>}
+     */
+    selectNextChord() {
+        return this.rpc('selectNextChord')
+    }
+
+    /**
+     * Move selection to the previous chord
+     * @returns {Promise<boolean>}
+     */
+    selectPrevChord() {
+        return this.rpc('selectPrevChord')
+    }
+
+    /**
+     * Extend selection to the next chord (for Shift+Right arrow)
+     * @returns {Promise<boolean>}
+     */
+    extendSelectionNextChord() {
+        return this.rpc('extendSelectionNextChord')
+    }
+
+    /**
+     * Extend selection to the previous chord (for Shift+Left arrow)
+     * @returns {Promise<boolean>}
+     */
+    extendSelectionPrevChord() {
+        return this.rpc('extendSelectionPrevChord')
+    }
+
+    /**
+     * Get the bounding box of the current selection
+     * @returns {Promise<{page: number, x: number, y: number, width: number, height: number} | null>}
+     */
+    getSelectionBoundingBox() {
+        return this.rpc('getSelectionBoundingBox')
+    }
+
+    /**
+     * Get the bounding boxes of all selected elements (for range selection)
+     * @returns {Promise<Array<{page: number, x: number, y: number, width: number, height: number}>>}
+     */
+    getSelectionBoundingBoxes() {
+        return this.rpc('getSelectionBoundingBoxes')
+    }
+
+    /**
+     * Get the selection MIME type for copy/paste.
+     * @returns {Promise<string>}
+     */
+    selectionMimeType() {
+        return this.rpc('selectionMimeType')
+    }
+
+    /**
+     * Get the selection MIME data for copy/paste.
+     * @returns {Promise<Uint8Array>}
+     */
+    selectionMimeData() {
+        return this.rpc('selectionMimeData')
+    }
+
+    /**
+     * Paste selection data at the current selection.
+     * @param {string} mimeType
+     * @param {Uint8Array} data
+     * @returns {Promise<boolean>}
+     */
+    pasteSelection(mimeType, data) {
+        return this.rpc('pasteSelection', [mimeType, data])
+    }
+
+    /**
+     * Select element at point with mode.
+     * @param {number} pageNumber
+     * @param {number} x
+     * @param {number} y
+     * @param {0|1|2} mode 0=replace, 1=add, 2=toggle
+     * @returns {Promise<boolean>}
+     */
+    selectElementAtPointWithMode(pageNumber, x, y, mode) {
+        return this.rpc('selectElementAtPointWithMode', [pageNumber, x, y, mode])
+    }
+
+    /**
+     * Delete the current selection.
+     * @returns {Promise<boolean>}
+     */
+    deleteSelection() {
+        return this.rpc('deleteSelection')
+    }
+
+    /**
+     * Raise pitch for the current selection.
+     * @returns {Promise<boolean>}
+     */
+    pitchUp() {
+        return this.rpc('pitchUp')
+    }
+
+    /**
+     * Lower pitch for the current selection.
+     * @returns {Promise<boolean>}
+     */
+    pitchDown() {
+        return this.rpc('pitchDown')
+    }
+
+    /**
+     * Transpose the current selection by semitone delta.
+     * If there is no selection, this transposes the whole score.
+     * @param {number} semitones
+     * @returns {Promise<boolean>}
+     */
+    transpose(semitones) {
+        return this.rpc('transpose', [semitones])
+    }
+
+    /**
+     * Set accidental for the current selection.
+     * @param {number} accidentalType see engraving::AccidentalType enum
+     * @returns {Promise<boolean>}
+     */
+    setAccidental(accidentalType) {
+        return this.rpc('setAccidental', [accidentalType])
+    }
+
+    /**
+     * Double the duration of the current selection.
+     * @returns {Promise<boolean>}
+     */
+    doubleDuration() {
+        return this.rpc('doubleDuration')
+    }
+
+    /**
+     * Halve the duration of the current selection.
+     * @returns {Promise<boolean>}
+     */
+    halfDuration() {
+        return this.rpc('halfDuration')
+    }
+
+    toggleDot() {
+        return this.rpc('toggleDot')
+    }
+
+    toggleDoubleDot() {
+        return this.rpc('toggleDoubleDot')
+    }
+
+    setNoteEntryMode(enabled) {
+        return this.rpc('setNoteEntryMode', [enabled ? 1 : 0])
+    }
+
+    setNoteEntryMethod(method) {
+        return this.rpc('setNoteEntryMethod', [method])
+    }
+
+    setInputStateFromSelection() {
+        return this.rpc('setInputStateFromSelection')
+    }
+
+    setInputAccidentalType(accidentalType) {
+        return this.rpc('setInputAccidentalType', [accidentalType])
+    }
+
+    setInputDurationType(durationType) {
+        return this.rpc('setInputDurationType', [durationType])
+    }
+
+    toggleInputDot() {
+        return this.rpc('toggleInputDot')
+    }
+
+    addPitchByStep(note, addToChord = false, insert = false) {
+        return this.rpc('addPitchByStep', [note, addToChord ? 1 : 0, insert ? 1 : 0])
+    }
+
+    enterRest() {
+        return this.rpc('enterRest')
+    }
+
+    setDurationType(durationType) {
+        return this.rpc('setDurationType', [durationType])
+    }
+
+    toggleLineBreak() {
+        return this.rpc('toggleLineBreak')
+    }
+
+    togglePageBreak() {
+        return this.rpc('togglePageBreak')
+    }
+
+    setVoice(voiceIndex) {
+        return this.rpc('setVoice', [voiceIndex])
+    }
+
+    changeSelectedElementsVoice(voiceIndex) {
+        return this.rpc('changeSelectedElementsVoice', [voiceIndex])
+    }
+
+    addDynamic(dynamicType) {
+        return this.rpc('addDynamic', [dynamicType])
+    }
+
+    addHairpin(hairpinType) {
+        return this.rpc('addHairpin', [hairpinType])
+    }
+
+    addPedal(pedalVariant) {
+        return this.rpc('addPedal', [pedalVariant])
+    }
+
+    addSostenutoPedal() {
+        return this.rpc('addSostenutoPedal')
+    }
+
+    addUnaCorda() {
+        return this.rpc('addUnaCorda')
+    }
+
+    splitPedal() {
+        return this.rpc('splitPedal')
+    }
+
+    addRehearsalMark() {
+        return this.rpc('addRehearsalMark')
+    }
+
+    addTempoText(bpm) {
+        return this.rpc('addTempoText', [bpm])
+    }
+
+    addStaffText(text) {
+        return this.rpc('addStaffText', [text])
+    }
+
+    addSystemText(text) {
+        return this.rpc('addSystemText', [text])
+    }
+
+    addExpressionText(text) {
+        return this.rpc('addExpressionText', [text])
+    }
+
+    addLyricText(text) {
+        return this.rpc('addLyricText', [text])
+    }
+
+    addHarmonyText(variant, text) {
+        return this.rpc('addHarmonyText', [variant, text])
+    }
+
+    addFingeringText(text) {
+        return this.rpc('addFingeringText', [text])
+    }
+
+    addLeftHandGuitarFingeringText(text) {
+        return this.rpc('addLeftHandGuitarFingeringText', [text])
+    }
+
+    addRightHandGuitarFingeringText(text) {
+        return this.rpc('addRightHandGuitarFingeringText', [text])
+    }
+
+    addStringNumberText(text) {
+        return this.rpc('addStringNumberText', [text])
+    }
+
+    addInstrumentChangeText(text) {
+        return this.rpc('addInstrumentChangeText', [text])
+    }
+
+    addStickingText(text) {
+        return this.rpc('addStickingText', [text])
+    }
+
+    addFiguredBassText(text) {
+        return this.rpc('addFiguredBassText', [text])
+    }
+
+    addArticulation(articulationSymbolName) {
+        return this.rpc('addArticulation', [articulationSymbolName])
+    }
+
+    addSlur() {
+        return this.rpc('addSlur')
+    }
+
+    addTie() {
+        return this.rpc('addTie')
+    }
+
+    addGraceNote(graceType) {
+        return this.rpc('addGraceNote', [graceType])
+    }
+
+    /**
+     * Add a simple tuplet (e.g. 3, 5, 7) at the current selection.
+     * @param {number} tupletCount
+     * @returns {Promise<boolean>}
+     */
+    addTuplet(tupletCount) {
+        return this.rpc('addTuplet', [tupletCount])
+    }
+
+    /**
+     * Convert a selected rest into a note
+     * @returns {Promise<boolean>}
+     */
+    addNoteFromRest() {
+        return this.rpc('addNoteFromRest')
+    }
+
+    toggleRepeatStart() {
+        return this.rpc('toggleRepeatStart')
+    }
+
+    toggleRepeatEnd() {
+        return this.rpc('toggleRepeatEnd')
+    }
+
+    setRepeatCount(count) {
+        return this.rpc('setRepeatCount', [count])
+    }
+
+    setBarLineType(barLineType) {
+        return this.rpc('setBarLineType', [barLineType])
+    }
+
+    addVolta(endingNumber) {
+        return this.rpc('addVolta', [endingNumber])
+    }
+
+    /**
+     * Insert new measures around the current selection or score edges.
+     * @see WebMscore.insertMeasures
+     */
+    insertMeasures(count, target) {
+        return this.rpc('insertMeasures', [count, target])
+    }
+
+    /**
+     * Remove all trailing empty measures from the end of the score.
+     * @returns {Promise<boolean>}
+     */
+    removeTrailingEmptyMeasures() {
+        return this.rpc('removeTrailingEmptyMeasures')
+    }
+
+    /**
+     * Remove the measure(s) containing the current selection.
+     * @returns {Promise<boolean>}
+     */
+    removeSelectedMeasures() {
+        return this.rpc('removeSelectedMeasures')
+    }
+
+    /**
+     * Undo the last command.
+     * @returns {Promise<boolean>}
+     */
+    undo() {
+        return this.rpc('undo')
+    }
+
+    /**
+     * Redo the last undone command.
+     * @returns {Promise<boolean>}
+     */
+    redo() {
+        return this.rpc('redo')
+    }
+
+    /**
+     * Force a relayout and update of the current score.
+     * @returns {Promise<boolean>}
+     */
+    relayout() {
+        return this.rpc('relayout')
+    }
+
+    /**
+     * Read load-stage timing/profile data for this score.
+     * @returns {Promise<Record<string, any>>}
+     */
+    loadProfile() {
+        return this.rpc('loadProfile')
+    }
+
+    /**
+     * Incrementally layout enough measures so the target page can be rendered.
+     * @param {number} pageNumber zero-based page index
+     * @returns {Promise<boolean>}
+     */
+    layoutUntilPage(pageNumber = 0) {
+        return this.rpc('layoutUntilPage', [pageNumber])
+    }
+
+    /**
+     * Incrementally layout until target page and return structured progress state.
+     * @param {number} pageNumber zero-based page index
+     * @returns {Promise<Record<string, any>>}
+     */
+    layoutUntilPageState(pageNumber = 0) {
+        return this.rpc('layoutUntilPageState', [pageNumber])
+    }
+
+    /**
+     * Set the layout mode for rendering (e.g., PAGE, LINE).
+     * @param {number} layoutMode
+     * @returns {Promise<boolean>}
+     */
+    setLayoutMode(layoutMode) {
+        return this.rpc('setLayoutMode', [layoutMode])
+    }
+
+    /**
+     * Get the current layout mode.
+     * @returns {Promise<number>}
+     */
+    getLayoutMode() {
+        return this.rpc('getLayoutMode')
+    }
+
+    /**
+     * Set the time signature (global) at the start of the score.
+     * @param {number} numerator
+     * @param {number} denominator
+     * @returns {Promise<boolean>}
+     */
+    setTimeSignature(numerator, denominator) {
+        return this.rpc('setTimeSignature', [numerator, denominator])
+    }
+
+    setTimeSignatureWithType(numerator, denominator, timeSigType) {
+        return this.rpc('setTimeSignatureWithType', [numerator, denominator, timeSigType])
+    }
+
+    /**
+     * Set the key signature (global) at the start of the score.
+     * @param {number} fifths -7..+7 (Cb..C#)
+     * @returns {Promise<boolean>}
+     */
+    setKeySignature(fifths) {
+        return this.rpc('setKeySignature', [fifths])
+    }
+
+    /**
+     * Get the key signature (global) at the start of the score.
+     * @returns {Promise<number>} fifths -7..+7 (Cb..C#)
+     */
+    getKeySignature() {
+        return this.rpc('getKeySignature')
+    }
+
+    /**
+     * Insert a clef at the current selection/input position.
+     * @param {number} clefType see engraving::ClefType enum
+     * @returns {Promise<boolean>}
+     */
+    setClef(clefType) {
+        return this.rpc('setClef', [clefType])
     }
 
     /**

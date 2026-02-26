@@ -29,6 +29,7 @@
 */
 
 #include <set>
+#include <cstdint>
 
 #include "async/channel.h"
 #include "io/iodevice.h"
@@ -51,6 +52,14 @@
 #include "spannermap.h"
 #include "synthesizerstate.h"
 #include "rootitem.h"
+
+// Forward declarations for WASM bridge helpers (implemented in web/main.cpp)
+bool _pitchUp(uintptr_t, int);
+bool _pitchDown(uintptr_t, int);
+bool _doubleDuration(uintptr_t, int);
+bool _halfDuration(uintptr_t, int);
+bool _undo(uintptr_t, int);
+bool _redo(uintptr_t, int);
 
 namespace mu::engraving {
 class IMimeData;
@@ -366,6 +375,13 @@ private:
     friend class compat::Read302;
     friend class Read400;
     friend class Layout;
+    // WASM bridge helpers (web/main.cpp)
+    friend bool ::_pitchUp(uintptr_t, int);
+    friend bool ::_pitchDown(uintptr_t, int);
+    friend bool ::_doubleDuration(uintptr_t, int);
+    friend bool ::_halfDuration(uintptr_t, int);
+    friend bool ::_undo(uintptr_t, int);
+    friend bool ::_redo(uintptr_t, int);
 
     static std::set<Score*> validScores;
     int _linkId { 0 };

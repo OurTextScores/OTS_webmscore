@@ -13,6 +13,7 @@ import {
 
 /** @see WebMscore.hasSoundfont */
 let _hasSoundfont = false
+const _utf8Decoder = typeof TextDecoder !== 'undefined' ? new TextDecoder() : null
 /**
  * Don't turn off logs if already set log level before `WebMscore.load(...)` is called
  * @see WebMscore.setLogLevel
@@ -228,11 +229,141 @@ class WebMscore {
     }
 
     /**
+     * Get the score subtitle
+     * @returns {Promise<string>}
+     */
+    async subtitle() {
+        const dataptr = Module.ccall('subtitle', 'number', ['number'], [this.scoreptr])
+        return WasmRes.readText(dataptr)
+    }
+
+    /**
      * Get the score title (filename safe, replaced some characters)
      */
     async titleFilenameSafe() {
         const title = await this.title()
         return title.replace(/[\s<>:{}"/\\|?*~.\0\cA-\cZ]+/g, '_')
+    }
+
+    /**
+     * Set the score title in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async setTitleText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('setTitleText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Set the score subtitle in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async setSubtitleText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('setSubtitleText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Set the score composer in the first title frame (VBox)
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async setComposerText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('setComposerText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Set the lyricist text in the title frame
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async setLyricistText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('setLyricistText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    async setSelectedText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('setSelectedText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Append a new part using an instrument template id
+     * @param {string} instrumentId
+     * @returns {Promise<boolean>}
+     */
+    async appendPart(instrumentId) {
+        const strptr = getStrPtr(instrumentId == null ? '' : String(instrumentId))
+        try {
+            return Module.ccall('appendPart', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Append a new part using a MusicXML instrument id
+     * @param {string} instrumentMusicXmlId
+     * @returns {Promise<boolean>}
+     */
+    async appendPartByMusicXmlId(instrumentMusicXmlId) {
+        const strptr = getStrPtr(instrumentMusicXmlId == null ? '' : String(instrumentMusicXmlId))
+        try {
+            return Module.ccall('appendPartByMusicXmlId', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Remove a part by index
+     * @param {number} partIndex
+     * @returns {Promise<boolean>}
+     */
+    async removePart(partIndex) {
+        return Module.ccall('removePart', 'boolean', ['number', 'number', 'number'], [this.scoreptr, partIndex, this.excerptId])
+    }
+
+    /**
+     * Toggle part visibility by index
+     * @param {number} partIndex
+     * @param {boolean} visible
+     * @returns {Promise<boolean>}
+     */
+    async setPartVisible(partIndex, visible) {
+        return Module.ccall('setPartVisible', 'boolean', ['number', 'number', 'number', 'number'], [this.scoreptr, partIndex, visible ? 1 : 0, this.excerptId])
+    }
+
+    /**
+     * List available instrument templates
+     * @returns {Promise<Array<{ id: string, name: string, groupId?: string, groupName?: string, familyId?: string, familyName?: string, staffCount?: number, isExtended?: boolean, instruments?: any[] }>>}
+     */
+    async listInstrumentTemplates() {
+        const dataptr = Module.ccall('listInstrumentTemplates', 'number', ['number'], [this.scoreptr])
+        return JSON.parse(WasmRes.readText(dataptr))
     }
 
     /**
@@ -242,6 +373,69 @@ class WebMscore {
     async npages() {
         const dataptr = Module.ccall('npages', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
         return WasmRes.readNum(dataptr)
+    }
+
+    /**
+     * Get the number of measures in a part (measure index basis for signatures).
+     * @param {number} partIndex
+     * @returns {Promise<number>}
+     */
+    async measureSignatureCount(partIndex) {
+        const dataptr = Module.ccall('measureSignatureCount', 'number', ['number', 'number', 'number'], [this.scoreptr, partIndex, this.excerptId])
+        return WasmRes.readNum(dataptr)
+    }
+
+    /**
+     * Get a compact signature string for a specific part measure.
+     * @param {number} partIndex
+     * @param {number} measureIndex
+     * @returns {Promise<string>}
+     */
+    async measureSignatureAt(partIndex, measureIndex) {
+        const dataptr = Module.ccall(
+            'measureSignatureAt',
+            'number',
+            ['number', 'number', 'number', 'number'],
+            [this.scoreptr, partIndex, measureIndex, this.excerptId]
+        )
+        return WasmRes.readText(dataptr)
+    }
+
+    /**
+     * Get all measure signatures for a part.
+     * @param {number} partIndex
+     * @returns {Promise<string[]>}
+     */
+    async measureSignatures(partIndex) {
+        const dataptr = Module.ccall('measureSignatures', 'number', ['number', 'number', 'number'], [this.scoreptr, partIndex, this.excerptId])
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    /**
+     * Get line break flags for each measure in the score.
+     * @returns {Promise<boolean[]>}
+     */
+    async measureLineBreaks() {
+        const dataptr = Module.ccall('measureLineBreaks', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    /**
+     * Set line break flags for each measure in the score.
+     * @param {boolean[]} breaks
+     * @returns {Promise<boolean>}
+     */
+    async setMeasureLineBreaks(breaks) {
+        const payload = JSON.stringify(Array.isArray(breaks) ? breaks : [])
+        const payloadPtr = getStrPtr(payload)
+        const result = Module.ccall(
+            'setMeasureLineBreaks',
+            'boolean',
+            ['number', 'number', 'number', 'number'],
+            [this.scoreptr, payloadPtr, payload.length, this.excerptId]
+        )
+        freePtr(payloadPtr)
+        return result
     }
 
     /**
@@ -299,16 +493,37 @@ class WebMscore {
     /**
      * Export score as the SVG file of one page
      * @param {number} pageNumber integer
-     * @param {boolean} drawPageBackground 
-     * @returns {Promise<string>} contents of the SVG file (plain text)
+     * @param {boolean} drawPageBackground
+     * @param {boolean} highlightSelection - if true, selected elements will be rendered with selection color
+     * @returns {Promise<Uint8Array>} UTF-8 SVG bytes
      */
-    async saveSvg(pageNumber = 0, drawPageBackground = false) {
+    async saveSvgRaw(pageNumber = 0, drawPageBackground = false, highlightSelection = false) {
         const dataptr = Module.ccall('saveSvg',
             'number',
-            ['number', 'number', 'boolean', 'number'],
-            [this.scoreptr, pageNumber, drawPageBackground, this.excerptId]
+            ['number', 'number', 'boolean', 'boolean', 'number'],
+            [this.scoreptr, pageNumber, drawPageBackground, highlightSelection, this.excerptId]
         )
-        return WasmRes.readText(dataptr)
+        return WasmRes.readData(dataptr)
+    }
+
+    /**
+     * Export score as the SVG file of one page
+     * @param {number} pageNumber integer
+     * @param {boolean} drawPageBackground
+     * @param {boolean} highlightSelection - if true, selected elements will be rendered with selection color
+     * @returns {Promise<string>} contents of the SVG file (plain text)
+     */
+    async saveSvg(pageNumber = 0, drawPageBackground = false, highlightSelection = false) {
+        const svgBytes = await this.saveSvgRaw(pageNumber, drawPageBackground, highlightSelection)
+        if (_utf8Decoder) {
+            return _utf8Decoder.decode(svgBytes)
+        }
+        // TextDecoder should exist in browser/worker runtimes, but keep a fallback for safety.
+        let text = ''
+        for (let i = 0; i < svgBytes.length; i += 1) {
+            text += String.fromCharCode(svgBytes[i])
+        }
+        return decodeURIComponent(escape(text))
     }
 
     /**
@@ -407,6 +622,58 @@ class WebMscore {
     }
 
     /**
+     * Synthesize audio frames from the current cursor/selection playback position.
+     * @param {number} batchSize - max number of result SynthRes' (n * 512 frames)
+     * @returns {Promise<(cancel?: boolean) => Promise<import('../schemas').SynthRes[]>>}
+     */
+    async synthAudioBatchFromSelection(batchSize) {
+        if (!WebMscore.hasSoundfont) {
+            throw new Error('The soundfont is not set.')
+        }
+
+        const iteratorFnPtr = Module.ccall('synthAudioFromSelection',
+            'number',
+            ['number', 'number'],
+            [this.scoreptr, this.excerptId]
+        )
+
+        if (!iteratorFnPtr) {
+            throw new Error('synthAudioFromSelection: Internal Error.')
+        }
+
+        return (cancel) => {
+            return this.processSynthBatch(iteratorFnPtr, batchSize, cancel)
+        }
+    }
+
+    /**
+     * Synthesize a short isolated preview for the current selection (note/chord).
+     * @param {number} batchSize - max number of result SynthRes' (n * 512 frames)
+     * @param {number} durationMs - preview duration in milliseconds
+     * @returns {Promise<(cancel?: boolean) => Promise<import('../schemas').SynthRes[]>>}
+     */
+    async synthSelectionPreviewBatch(batchSize, durationMs = 500) {
+        if (!WebMscore.hasSoundfont) {
+            throw new Error('The soundfont is not set.')
+        }
+
+        const seconds = Math.max(0.05, Number(durationMs) / 1000)
+        const iteratorFnPtr = Module.ccall('synthAudioSelectionPreview',
+            'number',
+            ['number', 'number', 'number'],
+            [this.scoreptr, seconds, this.excerptId]
+        )
+
+        if (!iteratorFnPtr) {
+            throw new Error('synthAudioSelectionPreview: Internal Error.')
+        }
+
+        return (cancel) => {
+            return this.processSynthBatch(iteratorFnPtr, batchSize, cancel)
+        }
+    }
+
+    /**
      * Synthesize audio frames
      * @private
      * @todo GC this iterator function
@@ -427,6 +694,56 @@ class WebMscore {
         const success = iteratorFnPtr !== 0
         if (!success) {
             throw new Error('synthAudio: Internal Error.')
+        }
+
+        return iteratorFnPtr
+    }
+
+    /**
+     * Synthesize audio frames from the current cursor/selection playback position.
+     * @private
+     * @returns {Promise<number>} Pointer to the iterator function
+     */
+    async _synthAudioFromSelection() {
+        if (!WebMscore.hasSoundfont) {
+            throw new Error('The soundfont is not set.')
+        }
+
+        const iteratorFnPtr = Module.ccall('synthAudioFromSelection',
+            'number',
+            ['number', 'number'],
+            [this.scoreptr, this.excerptId]
+        )
+
+        const success = iteratorFnPtr !== 0
+        if (!success) {
+            throw new Error('synthAudioFromSelection: Internal Error.')
+        }
+
+        return iteratorFnPtr
+    }
+
+    /**
+     * Synthesize a short isolated preview for the current selection (note/chord).
+     * @private
+     * @param {number} durationMs - preview duration in milliseconds
+     * @returns {Promise<number>} Pointer to the iterator function
+     */
+    async _synthAudioSelectionPreview(durationMs = 500) {
+        if (!WebMscore.hasSoundfont) {
+            throw new Error('The soundfont is not set.')
+        }
+
+        const seconds = Math.max(0.05, Number(durationMs) / 1000)
+        const iteratorFnPtr = Module.ccall('synthAudioSelectionPreview',
+            'number',
+            ['number', 'number', 'number'],
+            [this.scoreptr, seconds, this.excerptId]
+        )
+
+        const success = iteratorFnPtr !== 0
+        if (!success) {
+            throw new Error('synthAudioSelectionPreview: Internal Error.')
         }
 
         return iteratorFnPtr
@@ -524,6 +841,856 @@ class WebMscore {
     async saveMetadata() {
         const dataptr = Module.ccall('saveMetadata', 'number', ['number'], [this.scoreptr])
         return WasmRes.readText(dataptr)
+    }
+
+    /**
+     * Read load-stage timing/profile data for this score.
+     * @returns {Promise<Record<string, any>>}
+     */
+    async loadProfile() {
+        const dataptr = Module.ccall('loadProfile', 'number', ['number'], [this.scoreptr])
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    /**
+     * Select the topmost selectable element near a page-relative point
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    async selectElementAtPoint(pageNumber, x, y) {
+        return Module.ccall('selectElementAtPoint',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, this.excerptId]
+        )
+    }
+
+    /**
+     * Select a measure near a page-relative point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    async selectMeasureAtPoint(pageNumber, x, y) {
+        return Module.ccall('selectMeasureAtPoint',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, this.excerptId]
+        )
+    }
+
+    /**
+     * Select a measure by index for a specific part.
+     * @param {number} partIndex
+     * @param {number} measureIndex
+     * @returns {Promise<boolean>}
+     */
+    async selectPartMeasureByIndex(partIndex, measureIndex) {
+        return Module.ccall('selectPartMeasureByIndex',
+            'boolean',
+            ['number', 'number', 'number', 'number'],
+            [this.scoreptr, partIndex, measureIndex, this.excerptId]
+        )
+    }
+
+    /**
+     * Select a text element near a page-relative point.
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @returns {Promise<boolean>}
+     */
+    async selectTextElementAtPoint(pageNumber, x, y) {
+        return Module.ccall('selectTextElementAtPoint',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, this.excerptId]
+        )
+    }
+
+    /**
+     * Clear current selection
+     * @returns {Promise<boolean>}
+     */
+    async clearSelection() {
+        return Module.ccall('clearSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Move selection to the next chord
+     * @returns {Promise<boolean>}
+     */
+    async selectNextChord() {
+        return Module.ccall('selectNextChord', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Move selection to the previous chord
+     * @returns {Promise<boolean>}
+     */
+    async selectPrevChord() {
+        return Module.ccall('selectPrevChord', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Extend selection to the next chord (for Shift+Right arrow)
+     * @returns {Promise<boolean>}
+     */
+    async extendSelectionNextChord() {
+        return Module.ccall('extendSelectionNextChord', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Extend selection to the previous chord (for Shift+Left arrow)
+     * @returns {Promise<boolean>}
+     */
+    async extendSelectionPrevChord() {
+        return Module.ccall('extendSelectionPrevChord', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Get the bounding box of the current selection
+     * @returns {Promise<{page: number, x: number, y: number, width: number, height: number} | null>}
+     */
+    async getSelectionBoundingBox() {
+        const dataptr = Module.ccall('getSelectionBoundingBox', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        const json = WasmRes.readText(dataptr)
+        if (!json) return null
+        try {
+            return JSON.parse(json)
+        } catch (e) {
+            return null
+        }
+    }
+
+    /**
+     * Get the bounding boxes of all selected elements (for range selection)
+     * @returns {Promise<Array<{page: number, x: number, y: number, width: number, height: number}>>}
+     */
+    async getSelectionBoundingBoxes() {
+        const dataptr = Module.ccall('getSelectionBoundingBoxes', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        const json = WasmRes.readText(dataptr)
+        if (!json) return []
+        try {
+            return JSON.parse(json)
+        } catch (e) {
+            return []
+        }
+    }
+
+    /**
+     * Get the selection MIME type for copy/paste.
+     * @returns {Promise<string>}
+     */
+    async selectionMimeType() {
+        const dataptr = Module.ccall('selectionMimeType', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        return WasmRes.readText(dataptr)
+    }
+
+    /**
+     * Get the selection MIME data for copy/paste.
+     * @returns {Promise<Uint8Array>}
+     */
+    async selectionMimeData() {
+        const dataptr = Module.ccall('selectionMimeData', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        return WasmRes.readData(dataptr)
+    }
+
+    /**
+     * Paste selection data at the current selection.
+     * @param {string} mimeType
+     * @param {Uint8Array} data
+     * @returns {Promise<boolean>}
+     */
+    async pasteSelection(mimeType, data) {
+        const mimePtr = getStrPtr(mimeType)
+        const dataPtr = getTypedArrayPtr(data)
+        const result = Module.ccall('pasteSelection', 'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, mimePtr, dataPtr, data.byteLength, this.excerptId]
+        )
+        freePtr(mimePtr)
+        freePtr(dataPtr)
+        return result
+    }
+
+    /**
+     * Select the topmost selectable element near a page-relative point with mode
+     * @param {number} pageNumber zero-based page index
+     * @param {number} x
+     * @param {number} y
+     * @param {0|1|2} mode 0=replace, 1=add, 2=toggle
+     * @returns {Promise<boolean>}
+     */
+    async selectElementAtPointWithMode(pageNumber, x, y, mode) {
+        return Module.ccall('selectElementAtPointWithMode',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, pageNumber, x, y, mode, this.excerptId]
+        )
+    }
+
+    /**
+     * Delete the current selection
+     * @returns {Promise<boolean>}
+     */
+    async deleteSelection() {
+        return Module.ccall('deleteSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Raise pitch for the current selection
+     */
+    async pitchUp() {
+        return Module.ccall('pitchUp', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Lower pitch for the current selection
+     */
+    async pitchDown() {
+        return Module.ccall('pitchDown', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Transpose the current selection by semitone delta.
+     * If there is no selection, this transposes the whole score.
+     * @param {number} semitones
+     * @returns {Promise<boolean>}
+     */
+    async transpose(semitones) {
+        return Module.ccall('transpose', 'boolean', ['number', 'number', 'number'], [this.scoreptr, semitones, this.excerptId])
+    }
+
+    /**
+     * Set accidental for the current selection.
+     * @param {number} accidentalType see engraving::AccidentalType enum
+     * @returns {Promise<boolean>}
+     */
+    async setAccidental(accidentalType) {
+        return Module.ccall('setAccidental', 'boolean', ['number', 'number', 'number'], [this.scoreptr, accidentalType, this.excerptId])
+    }
+
+    /**
+     * Double the duration of the current selection
+     */
+    async doubleDuration() {
+        return Module.ccall('doubleDuration', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Halve the duration of the current selection
+     */
+    async halfDuration() {
+        return Module.ccall('halfDuration', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Toggle dotted duration on the current selection
+     */
+    async toggleDot() {
+        return Module.ccall('toggleDot', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Toggle double-dotted duration on the current selection
+     */
+    async toggleDoubleDot() {
+        return Module.ccall('toggleDoubleDot', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Enable or disable note entry mode
+     * @param {boolean} enabled
+     * @returns {Promise<boolean>}
+     */
+    async setNoteEntryMode(enabled) {
+        return Module.ccall('setNoteEntryMode', 'boolean', ['number', 'number', 'number'], [this.scoreptr, enabled ? 1 : 0, this.excerptId])
+    }
+
+    /**
+     * Set note entry method
+     * @param {number} method see engraving::NoteEntryMethod enum
+     * @returns {Promise<boolean>}
+     */
+    async setNoteEntryMethod(method) {
+        return Module.ccall('setNoteEntryMethod', 'boolean', ['number', 'number', 'number'], [this.scoreptr, method, this.excerptId])
+    }
+
+    /**
+     * Seed input state (segment/track/duration) from the current selection
+     * @returns {Promise<boolean>}
+     */
+    async setInputStateFromSelection() {
+        return Module.ccall('setInputStateFromSelection', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Set accidental type for note entry input
+     * @param {number} accidentalType see engraving::AccidentalType enum
+     * @returns {Promise<boolean>}
+     */
+    async setInputAccidentalType(accidentalType) {
+        return Module.ccall('setInputAccidentalType', 'boolean', ['number', 'number', 'number'], [this.scoreptr, accidentalType, this.excerptId])
+    }
+
+    /**
+     * Set input duration type for note entry
+     * @param {number} durationType see engraving::DurationType enum
+     * @returns {Promise<boolean>}
+     */
+    async setInputDurationType(durationType) {
+        return Module.ccall('setInputDurationType', 'boolean', ['number', 'number', 'number'], [this.scoreptr, durationType, this.excerptId])
+    }
+
+    /**
+     * Toggle dotting for the current input duration
+     * @returns {Promise<boolean>}
+     */
+    async toggleInputDot() {
+        return Module.ccall('toggleInputDot', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add a pitch by letter step (0=C ... 6=B)
+     * @param {number} note
+     * @param {boolean} addToChord
+     * @param {boolean} insert
+     * @returns {Promise<boolean>}
+     */
+    async addPitchByStep(note, addToChord = false, insert = false) {
+        return Module.ccall(
+            'addPitchByStep',
+            'boolean',
+            ['number', 'number', 'number', 'number', 'number'],
+            [this.scoreptr, note, addToChord ? 1 : 0, insert ? 1 : 0, this.excerptId],
+        )
+    }
+
+    /**
+     * Enter a rest at the input cursor using the current duration
+     * @returns {Promise<boolean>}
+     */
+    async enterRest() {
+        return Module.ccall('enterRest', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Set duration type for the current selection
+     * @param {number} durationType see engraving::DurationType enum
+     * @returns {Promise<boolean>}
+     */
+    async setDurationType(durationType) {
+        return Module.ccall('setDurationType', 'boolean', ['number', 'number', 'number'], [this.scoreptr, durationType, this.excerptId])
+    }
+
+    /**
+     * Toggle a line break on the selected measure
+     */
+    async toggleLineBreak() {
+        return Module.ccall('toggleLineBreak', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Toggle a page break on the selected measure
+     */
+    async togglePageBreak() {
+        return Module.ccall('togglePageBreak', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Set voice index (0-3) for input/selection
+     * @param {number} voiceIndex
+     * @returns {Promise<boolean>}
+     */
+    async setVoice(voiceIndex) {
+        return Module.ccall('setVoice', 'boolean', ['number', 'number', 'number'], [this.scoreptr, voiceIndex, this.excerptId])
+    }
+
+    /**
+     * Move selected elements to another voice
+     * @param {number} voiceIndex
+     * @returns {Promise<boolean>}
+     */
+    async changeSelectedElementsVoice(voiceIndex) {
+        return Module.ccall('changeSelectedElementsVoice', 'boolean', ['number', 'number', 'number'], [this.scoreptr, voiceIndex, this.excerptId])
+    }
+
+    /**
+     * Undo the last command
+     */
+    async undo() {
+        return Module.ccall('undo', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Redo the last undone command
+     */
+    async redo() {
+        return Module.ccall('redo', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Force a relayout and update of the current score
+     */
+    async relayout() {
+        return Module.ccall('relayout', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Incrementally layout enough of the score so `pageNumber` can be exported.
+     * Useful for faster first paint on very large scores loaded with `doLayout=false`.
+     * @param {number} pageNumber zero-based target page index
+     * @returns {Promise<boolean>}
+     */
+    async layoutUntilPage(pageNumber = 0) {
+        return Module.ccall('layoutUntilPage', 'boolean', ['number', 'number', 'number'], [this.scoreptr, pageNumber, this.excerptId])
+    }
+
+    /**
+     * Incrementally layout until target page and return structured progress state.
+     * @param {number} pageNumber zero-based target page index
+     * @returns {Promise<Record<string, any>>}
+     */
+    async layoutUntilPageState(pageNumber = 0) {
+        const dataptr = Module.ccall('layoutUntilPageState', 'number', ['number', 'number', 'number'], [this.scoreptr, pageNumber, this.excerptId])
+        return JSON.parse(WasmRes.readText(dataptr))
+    }
+
+    /**
+     * Set the layout mode for rendering (e.g., PAGE, LINE).
+     * @param {number} layoutMode see engraving::LayoutMode enum
+     * @returns {Promise<boolean>}
+     */
+    async setLayoutMode(layoutMode) {
+        return Module.ccall('setLayoutMode', 'boolean', ['number', 'number', 'number'], [this.scoreptr, layoutMode, this.excerptId])
+    }
+
+    /**
+     * Get the current layout mode.
+     * @returns {Promise<number>}
+     */
+    async getLayoutMode() {
+        const dataptr = Module.ccall('getLayoutMode', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+        return WasmRes.readNum(dataptr)
+    }
+
+    /**
+     * Add a dynamic marking at the current selection
+     * @param {number} dynamicType see engraving::DynamicType enum
+     * @returns {Promise<boolean>}
+     */
+    async addDynamic(dynamicType) {
+        return Module.ccall('addDynamic', 'boolean', ['number', 'number', 'number'], [this.scoreptr, dynamicType, this.excerptId])
+    }
+
+    /**
+     * Add a hairpin at the current selection
+     * @param {number} hairpinType see engraving::HairpinType enum (0=cresc, 1=decresc)
+     * @returns {Promise<boolean>}
+     */
+    async addHairpin(hairpinType) {
+        return Module.ccall('addHairpin', 'boolean', ['number', 'number', 'number'], [this.scoreptr, hairpinType, this.excerptId])
+    }
+
+    /**
+     * Add a pedal marking at the current selection
+     * @param {number} pedalVariant 0=line, 1=text
+     * @returns {Promise<boolean>}
+     */
+    async addPedal(pedalVariant) {
+        return Module.ccall('addPedal', 'boolean', ['number', 'number', 'number'], [this.scoreptr, pedalVariant, this.excerptId])
+    }
+
+    /**
+     * Add a sostenuto pedal marking at the current selection
+     * @returns {Promise<boolean>}
+     */
+    async addSostenutoPedal() {
+        return Module.ccall('addSostenutoPedal', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add an una corda marking at the current selection
+     * @returns {Promise<boolean>}
+     */
+    async addUnaCorda() {
+        return Module.ccall('addUnaCorda', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Split a pedal line at the current selection
+     * @returns {Promise<boolean>}
+     */
+    async splitPedal() {
+        return Module.ccall('splitPedal', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add a rehearsal mark at the current selection
+     * @returns {Promise<boolean>}
+     */
+    async addRehearsalMark() {
+        return Module.ccall('addRehearsalMark', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add tempo text at the current selection
+     * @param {number} bpm
+     * @returns {Promise<boolean>}
+     */
+    async addTempoText(bpm) {
+        return Module.ccall('addTempoText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, bpm, this.excerptId])
+    }
+
+    /**
+     * Add staff text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addStaffText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addStaffText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add system text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addSystemText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addSystemText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add expression text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addExpressionText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addExpressionText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add lyric text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addLyricText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addLyricText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add harmony text at the current selection
+     * @param {number} variant 0=standard, 1=roman, 2=nashville
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addHarmonyText(variant, text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addHarmonyText', 'boolean', ['number', 'number', 'number', 'number'], [this.scoreptr, variant, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add fingering text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addFingeringText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addFingeringText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add left-hand guitar fingering text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addLeftHandGuitarFingeringText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall(
+                'addLeftHandGuitarFingeringText',
+                'boolean',
+                ['number', 'number', 'number'],
+                [this.scoreptr, strptr, this.excerptId],
+            )
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add right-hand guitar fingering text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addRightHandGuitarFingeringText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall(
+                'addRightHandGuitarFingeringText',
+                'boolean',
+                ['number', 'number', 'number'],
+                [this.scoreptr, strptr, this.excerptId],
+            )
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add string number text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addStringNumberText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addStringNumberText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add instrument change text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addInstrumentChangeText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addInstrumentChangeText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add sticking text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addStickingText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addStickingText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add figured bass text at the current selection
+     * @param {string} text
+     * @returns {Promise<boolean>}
+     */
+    async addFiguredBassText(text) {
+        const strptr = getStrPtr(text == null ? '' : String(text))
+        try {
+            return Module.ccall('addFiguredBassText', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add or remove an articulation on the selected notes/chords.
+     * @param {string} articulationSymbolName e.g. "articStaccatoAbove"
+     * @returns {Promise<boolean>}
+     */
+    async addArticulation(articulationSymbolName) {
+        const strptr = getStrPtr(articulationSymbolName)
+        try {
+            return Module.ccall('addArticulation', 'boolean', ['number', 'number', 'number'], [this.scoreptr, strptr, this.excerptId])
+        } finally {
+            freePtr(strptr)
+        }
+    }
+
+    /**
+     * Add a slur spanning the current selection.
+     * - With a single selected note, this slurs to the next chord/rest.
+     * - With multi-selection, this slurs from the first selected chord/rest to the last.
+     * @returns {Promise<boolean>}
+     */
+    async addSlur() {
+        return Module.ccall('addSlur', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add a tie from the selected note(s) to the next matching pitch.
+     * @returns {Promise<boolean>}
+     */
+    async addTie() {
+        return Module.ccall('addTie', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Add a grace note of the specified type to the selected note(s).
+     * @param {number} graceType
+     * @returns {Promise<boolean>}
+     */
+    async addGraceNote(graceType) {
+        return Module.ccall('addGraceNote', 'boolean', ['number', 'number', 'number'], [this.scoreptr, graceType, this.excerptId])
+    }
+
+    /**
+     * Add a simple tuplet (e.g. 3, 5, 7) at the current selection.
+     * @param {number} tupletCount
+     * @returns {Promise<boolean>}
+     */
+    async addTuplet(tupletCount) {
+        return Module.ccall('addTuplet', 'boolean', ['number', 'number', 'number'], [this.scoreptr, tupletCount, this.excerptId])
+    }
+
+    /**
+     * Convert a selected rest into a note
+     * @returns {Promise<boolean>}
+     */
+    async addNoteFromRest() {
+        return Module.ccall('addNoteFromRest', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Toggle a repeat start on the selected measure
+     */
+    async toggleRepeatStart() {
+        return Module.ccall('toggleRepeatStart', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Toggle a repeat end on the selected measure
+     */
+    async toggleRepeatEnd() {
+        return Module.ccall('toggleRepeatEnd', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Set the repeat count on the selected measure
+     * @param {number} count
+     */
+    async setRepeatCount(count) {
+        return Module.ccall('setRepeatCount', 'boolean', ['number', 'number', 'number'], [this.scoreptr, count, this.excerptId])
+    }
+
+    /**
+     * Set the end barline type on the selected measure
+     * @param {number} barLineType
+     */
+    async setBarLineType(barLineType) {
+        return Module.ccall('setBarLineType', 'boolean', ['number', 'number', 'number'], [this.scoreptr, barLineType, this.excerptId])
+    }
+
+    /**
+     * Add a volta ending at the selected measure or range
+     * @param {number} endingNumber
+     */
+    async addVolta(endingNumber) {
+        return Module.ccall('addVolta', 'boolean', ['number', 'number', 'number'], [this.scoreptr, endingNumber, this.excerptId])
+    }
+
+    /**
+     * Insert new measures around the current selection or score edges.
+     * @param {number} count
+     * @param {number} target Target enum: 0 after selection, 1 before selection, 2 start of score, 3 end of score
+     */
+    async insertMeasures(count, target) {
+        return Module.ccall('insertMeasures', 'boolean', ['number', 'number', 'number', 'number'], [this.scoreptr, count, target, this.excerptId])
+    }
+
+    /**
+     * Remove all trailing empty measures from the end of the score
+     * @returns {Promise<boolean>}
+     */
+    async removeTrailingEmptyMeasures() {
+        return Module.ccall('removeTrailingEmptyMeasures', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Remove the measure(s) containing the current selection.
+     * @returns {Promise<boolean>}
+     */
+    async removeSelectedMeasures() {
+        return Module.ccall('removeSelectedMeasures', 'boolean', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Set the time signature (global) at the start of the score
+     * @param {number} numerator
+     * @param {number} denominator
+     * @returns {Promise<boolean>}
+     */
+    async setTimeSignature(numerator, denominator) {
+        return Module.ccall('setTimeSignature', 'boolean', ['number', 'number', 'number', 'number'], [this.scoreptr, numerator, denominator, this.excerptId])
+    }
+
+    /**
+     * Set the time signature (global) with a specific display type.
+     * @param {number} numerator
+     * @param {number} denominator
+     * @param {number} timeSigType 0=Normal, 1=Common time, 2=Cut time
+     * @returns {Promise<boolean>}
+     */
+    async setTimeSignatureWithType(numerator, denominator, timeSigType) {
+        return Module.ccall('setTimeSignatureWithType', 'boolean', ['number', 'number', 'number', 'number', 'number'], [this.scoreptr, numerator, denominator, timeSigType, this.excerptId])
+    }
+
+    /**
+     * Set the key signature (global) at the start of the score.
+     * @param {number} fifths -7..+7 (Cb..C#)
+     * @returns {Promise<boolean>}
+     */
+    async setKeySignature(fifths) {
+        return Module.ccall('setKeySignature', 'boolean', ['number', 'number', 'number'], [this.scoreptr, fifths, this.excerptId])
+    }
+
+    /**
+     * Get the key signature (global) at the start of the score.
+     * @returns {Promise<number>} fifths -7..+7 (Cb..C#)
+     */
+    async getKeySignature() {
+        return Module.ccall('getKeySignature', 'number', ['number', 'number'], [this.scoreptr, this.excerptId])
+    }
+
+    /**
+     * Insert a clef at the current selection/input position
+     * @param {number} clefType see engraving::ClefType enum
+     * @returns {Promise<boolean>}
+     */
+    async setClef(clefType) {
+        return Module.ccall('setClef', 'boolean', ['number', 'number', 'number'], [this.scoreptr, clefType, this.excerptId])
     }
 
     /**

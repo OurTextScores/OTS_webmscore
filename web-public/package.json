@@ -5,7 +5,8 @@
     "type": "module",
     "types": "./src/index.d.ts",
     "main": "./webmscore.nodejs.cjs",
-    "browser": "./webmscore.cdn.mjs",
+    "browser": "./webmscore.webpack.mjs",
+    "module": "./webmscore.mjs",
     "files": [
         "src",
         "schemas.ts",
@@ -42,7 +43,9 @@
         "@babel/core": "^7.20.12",
         "@babel/preset-env": "^7.20.2",
         "@rollup/plugin-babel": "^5.2.2",
-        "rollup": "^2.8.2"
+        "csstype": "^3.2.3",
+        "rollup": "^2.8.2",
+        "undici-types": "^7.16.0"
     },
     "scripts": {
         "build": "npm run clean && npm run build:no-clean",
@@ -55,7 +58,7 @@
         "clean": "npm run clean:d-ts && npm run clean:md && cd ../web/ && make clean",
         "clean:d-ts": "rm -f src/*.d.ts *.d.ts",
         "clean:md": "rm -f *.md",
-        "d-ts": "tsc --emitDeclarationOnly --declaration --allowJs --lib esnext --target esnext src/index.js",
+        "d-ts": "NODE_PATH=./node_modules tsc --project tsconfig.json",
         "prepack": "cp ../README.md . && cp ../CHANGELOG.md .",
         "install:webpack": "node -e \"fs.linkSync('webmscore.lib.wasm', 'webmscore.lib.wasm-');fs.linkSync('webmscore.lib.mem.wasm', 'webmscore.lib.mem-')\" || true # workaround for Webpack 4"
     }
